@@ -1,0 +1,7 @@
+sample_input/
+sample_output/
+*.pdf
+__pycache__/
+*.pyc
+.env
+.git/

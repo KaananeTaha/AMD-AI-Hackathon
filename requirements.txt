@@ -1,0 +1,3 @@
+# No third-party deps yet — the echo skeleton uses only the stdlib.
+# Add the OpenAI-compatible client here when wiring in Fireworks, e.g.:
+# openai>=1.0.0
