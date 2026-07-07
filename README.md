@@ -69,5 +69,27 @@ python test_classifier.py
 - [x] `reasoning_effort="none"` (fixes blank answers, huge token savings)
 - [x] Parallel task execution + 25s request timeout
 - [x] Verified vs real hackathon models: 8 tasks, ~1330 tokens, ~6s, all correct
-- [ ] Build & push Docker image, submit
-- [ ] On eval day: sanity-check tier log line in the harness output
+- [x] CI: GitHub Actions builds linux/amd64 image on every push to main
+- [ ] Make the GHCR package public (one-time, see below), then submit
+
+## Docker image
+
+Every push to `main` builds and pushes:
+
+```
+ghcr.io/kaananetaha/amd-track1:latest
+```
+
+**One-time step after the first successful build:** the GHCR package starts
+private. Make it public at
+https://github.com/users/KaananeTaha/packages/container/amd-track1/settings
+(Danger Zone → Change visibility → Public), otherwise the judges' pull fails.
+
+Test the container like the harness does:
+
+```bash
+docker run --rm \
+  -v "$PWD/sample_input:/input:ro" -v "$PWD/out:/output" \
+  -e FIREWORKS_API_KEY -e FIREWORKS_BASE_URL -e ALLOWED_MODELS \
+  ghcr.io/kaananetaha/amd-track1:latest
+```

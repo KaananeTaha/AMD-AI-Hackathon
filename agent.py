@@ -74,9 +74,9 @@ _PROMPTS: dict[Category, tuple[str, int, str]] = {
 def _handle(prompt: str, category: Category) -> str:
     system, max_tokens, tier = _PROMPTS[category]
     primary = model_for_tier(tier)
-    # Fall back to the cheap tier if the primary returns blank (e.g. a reasoning
-    # model truncated before emitting an answer). Cheap is usually non-reasoning.
-    fallback = model_for_tier(CHEAP)
+    # Cross-tier fallback for blank answers or hard failures: cheap-tier tasks
+    # escalate to strong; everything else de-escalates to cheap.
+    fallback = model_for_tier(STRONG if tier == CHEAP else CHEAP)
     return complete(
         prompt, system=system, max_tokens=max_tokens,
         model=primary, fallback_model=fallback,

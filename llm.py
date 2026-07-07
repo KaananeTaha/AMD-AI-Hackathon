@@ -230,8 +230,14 @@ def complete(
     messages.append({"role": "user", "content": prompt})
 
     primary = model or pick_model()
-    choice = _chat(primary, messages, max_tokens, temperature, reasoning_effort)
-    content = (choice.message.content or "").strip()
+    try:
+        choice = _chat(primary, messages, max_tokens, temperature, reasoning_effort)
+        content = (choice.message.content or "").strip()
+    except Exception:
+        # Primary model unreachable/failed — the fallback is our only shot.
+        if not (fallback_model and fallback_model != primary):
+            raise
+        content = ""
 
     if not content and fallback_model and fallback_model != primary:
         choice = _chat(fallback_model, messages, max_tokens, temperature,
