@@ -15,8 +15,9 @@ from concurrent.futures import ThreadPoolExecutor
 from agent import solve
 from llm import describe_tiers, usage
 
-INPUT_PATH = os.environ.get("INPUT_PATH", "/input/tasks.json")
-OUTPUT_PATH = os.environ.get("OUTPUT_PATH", "/output/results.json")
+
+INPUT_PATH = os.environ.get("INPUT_PATH", "input/tasks.json")
+OUTPUT_PATH = os.environ.get("OUTPUT_PATH", "output/results.json")
 MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "8"))
 # Stop collecting answers with headroom before the harness's 10-minute kill,
 # so results.json always gets written even if some tasks never finish.
