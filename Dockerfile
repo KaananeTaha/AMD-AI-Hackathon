@@ -5,9 +5,8 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Dependencies first for layer caching.
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Only the agent's dependency — UI packages in requirements.txt stay out of the image.
+RUN pip install --no-cache-dir "openai>=1.30.0"
 
 COPY main.py agent.py classifier.py llm.py ./
 

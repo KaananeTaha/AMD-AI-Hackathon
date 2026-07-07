@@ -1,24 +1,43 @@
-# AMD Developer Hackathon — Track 1: General-Purpose AI Agent
+# AMD Developer Hackathon — Track 1 Agent + Nova UI
 
-A token-efficient agent that reads tasks, classifies each into one of 8 capability
-categories with **zero-token keyword heuristics**, then answers with a
-category-specific handler. Routing spends no LLM tokens so the budget goes to answers
-(scoring ranks passing submissions by fewest tokens).
+Two pieces in one repo:
 
-## Layout
+- **Track 1 agent** (repo root) — token-efficient general-purpose agent, submitted as a
+  Docker image. Classifies each task with **zero-token keyword heuristics**, then answers
+  via tiered Fireworks models (scoring ranks passing submissions by fewest tokens).
+- **Nova** (`ui/`) — a PySide6 desktop chat app wired to the same agent pipeline, used to
+  test the agent interactively. Not part of the judged image.
+
+## Setup (both pieces)
+
+```powershell
+pip install -r requirements.txt      # agent + UI deps
+copy .env.example .env               # then fill in YOUR Fireworks API key
+```
+
+Without a `.env` (or the harness-injected env) the agent exits 1 with a clear error —
+`FIREWORKS_API_KEY`, `FIREWORKS_BASE_URL`, and `ALLOWED_MODELS` are required.
+
+## Track 1 agent
 
 | File | Role |
 |------|------|
-| `main.py` | Entrypoint. Reads `/input/tasks.json` → solves tasks **concurrently** (`MAX_WORKERS`, default 8) → writes `/output/results.json` → exit 0. A run deadline (`DEADLINE_S`, default 480) guarantees partial results get written before the 10-min harness kill. Logs tier mapping + token usage to stderr. |
-| `classifier.py` | Single-pass regex/keyword router → one of 8 `Category` values (zero tokens). |
-| `agent.py` | Dispatch layer: category → (system prompt, max_tokens, model tier) → one Fireworks call. |
-| `llm.py` | Fireworks client (OpenAI SDK @ `FIREWORKS_BASE_URL`). Model tiering from `ALLOWED_MODELS`, `reasoning_effort="none"` by default, blank-answer fallback, token accounting, 25s timeout. |
+| `main.py` | Entrypoint. Reads `/input/tasks.json` → solves tasks concurrently (`MAX_WORKERS`, default 8) → writes `/output/results.json` → exit 0. A run deadline (`DEADLINE_S`, default 480) guarantees partial results get written before the 10-min harness kill. Logs tier mapping + token usage to stderr. |
+| `classifier.py` | Single-pass regex/keyword router → one of 8 categories (zero tokens). |
+| `agent.py` | Category → (system prompt, max_tokens, model tier) → one Fireworks call. |
+| `llm.py` | Fireworks client (OpenAI SDK @ `FIREWORKS_BASE_URL`). Tiering from `ALLOWED_MODELS`, `reasoning_effort="none"` by default, cross-tier fallback on blank/failed calls, token accounting, 25s timeout. |
 | `profile_models.py` | Probe each allowed model: token burn, reasoning behaviour, latency. |
-| `test_classifier.py` | Classifier stress test (tuned + held-out sets, per-category accuracy). |
-| `sample_input/tasks.json` | 8 example tasks, one per category, for local runs. |
-| `Dockerfile` | Submission image (`linux/amd64`). |
+| `test_classifier.py` | Classifier stress test (tuned + held-out sets). |
 
-## Model tiers (inferred from `ALLOWED_MODELS` at runtime)
+Run locally:
+
+```powershell
+python main.py            # full pipeline on sample_input/, prints token usage
+python test_classifier.py # classifier regression
+python profile_models.py  # probe allowed models
+```
+
+### Model tiers (inferred from `ALLOWED_MODELS` at runtime)
 
 | Tier | Launch-day pick | Categories |
 |------|-----------------|-----------|
@@ -29,63 +48,24 @@ category-specific handler. Routing spends no LLM tokens so the budget goes to an
 Overrides: `MODEL` (everything) > `MODEL_STRONG` / `MODEL_CODE` / `MODEL_CHEAP` > inferred.
 
 **Key finding:** `minimax-m3` is a reasoning model — without `reasoning_effort="none"` it
-burns its whole token budget on hidden reasoning and returns a **blank** answer on hard
-prompts. With `"none"` it answers correctly in a handful of tokens. `llm.py` sends `"none"`
-by default and auto-retries without the param for models that reject it.
+burns the whole token budget on hidden reasoning and returns a **blank** answer on hard
+prompts. `llm.py` sends `"none"` by default and auto-retries without the param for models
+that reject it.
 
-## Run locally (Windows / PowerShell)
+Note: personal Fireworks keys can't reach the gemma models (404) — `glm-5p2` stands in as
+the cheap tier locally. The harness list works fully at eval time.
 
-Put your own key in `.env` (gitignored; see `llm.py` for the loader), then:
-
-```powershell
-python main.py            # full pipeline on sample_input/, prints token usage
-python test_classifier.py # classifier regression
-python profile_models.py  # probe allowed models for token burn / reasoning
-```
-
-Note: personal Fireworks keys can't reach the gemma models (404) — `glm-5p2` stands in
-as the cheap tier locally. The harness list works fully at eval time.
-
-Run the classifier stress test:
-
-```powershell
-python test_classifier.py
-```
-
-## Contract (from the participant guide)
+### Harness contract
 
 - Input `/input/tasks.json`: `[ { "task_id": "t1", "prompt": "..." }, ... ]`
 - Output `/output/results.json`: `[ { "task_id": "t1", "answer": "..." }, ... ]`
-- Exit 0 on success; output must be valid JSON.
-- Env injected by the harness at eval time — **read from the environment, do not hardcode or bundle `.env`**:
-  `FIREWORKS_API_KEY`, `FIREWORKS_BASE_URL` (route ALL calls through it), `ALLOWED_MODELS` (comma-separated).
+- Exit 0 on success; output must be valid JSON; env is injected by the harness.
 
-## Status / next steps
+### Docker image
 
-- [x] Harness skeleton, exit-code-0 verified end-to-end
-- [x] Heuristic classifier + stress test (57/57 tuned, 19/19 held-out)
-- [x] Fireworks handlers wired, per-category prompts + token caps
-- [x] Model tiering (strong/code/cheap) from `ALLOWED_MODELS`
-- [x] `reasoning_effort="none"` (fixes blank answers, huge token savings)
-- [x] Parallel task execution + 25s request timeout
-- [x] Verified vs real hackathon models: 8 tasks, ~1330 tokens, ~6s, all correct
-- [x] CI: GitHub Actions builds linux/amd64 image on every push to main
-- [ ] Make the GHCR package public (one-time, see below), then submit
-
-## Docker image
-
-Every push to `main` builds and pushes:
-
-```
-ghcr.io/kaananetaha/amd-track1:latest
-```
-
-**One-time step after the first successful build:** the GHCR package starts
-private. Make it public at
-https://github.com/users/KaananeTaha/packages/container/amd-track1/settings
-(Danger Zone → Change visibility → Public), otherwise the judges' pull fails.
-
-Test the container like the harness does:
+Every push to `main` (excluding `ui/`-only changes) builds and pushes
+`ghcr.io/kaananetaha/amd-track1:latest` (linux/amd64) via GitHub Actions — this is the
+submission artifact. Test it like the harness does:
 
 ```bash
 docker run --rm \
@@ -93,3 +73,37 @@ docker run --rm \
   -e FIREWORKS_API_KEY -e FIREWORKS_BASE_URL -e ALLOWED_MODELS \
   ghcr.io/kaananetaha/amd-track1:latest
 ```
+
+## Nova UI (`ui/`)
+
+Dark-themed desktop chat (PySide6): streaming responses, full Markdown + syntax-highlighted
+code with per-block copy, collapsible sidebar with pinned/recent conversations, SQLite
+persistence, edit-and-resend, regenerate, toasts, keyboard shortcuts.
+
+```powershell
+cd ui
+python main.py
+```
+
+Nova talks to the model through one seam — `AIProvider.stream_completion` in
+`ui/app/services/ai_service.py`. `ACTIVE_PROVIDER` in `ui/app/config.py` selects:
+
+- `"agent"` (default) — routes through the Track 1 agent at the repo root: same
+  classifier, same tiers, same reasoning suppression. Each reply is prefixed with a
+  `category → model` routing badge (`SHOW_AGENT_ROUTING = False` to hide).
+- `"fireworks"` — plain single-model Fireworks call.
+- `"placeholder"` — canned offline responses, no network or key needed.
+
+AI calls run on a worker `QThread` and stream per-chunk via Qt signals, so the window
+never blocks. Icons are runtime-generated SVG line-icons (no icon-font dependency);
+Markdown renders via `python-markdown` + Pygments.
+
+## Status
+
+- [x] Zero-token classifier + stress test (57/57 tuned, 19/19 held-out)
+- [x] Tiered Fireworks handlers, reasoning suppression, cross-tier fallback
+- [x] Parallel execution, run deadline, token accounting
+- [x] Verified vs real hackathon models: 8 tasks, ~1220 tokens, ~6s, all correct
+- [x] CI → GHCR image (public, linux/amd64, verified pullable)
+- [x] Nova UI wired to the agent
+- [ ] Submit `ghcr.io/kaananetaha/amd-track1:latest`

@@ -68,6 +68,17 @@ def run(tasks: list[dict]) -> list[dict]:
 
 
 def main() -> int:
+    missing = [k for k in ("FIREWORKS_API_KEY", "FIREWORKS_BASE_URL", "ALLOWED_MODELS")
+               if not os.environ.get(k)]
+    if missing:
+        print(
+            f"FATAL: missing environment variables: {', '.join(missing)}\n"
+            "The judging harness injects these automatically. For local runs, "
+            "copy .env.example to .env and fill in your Fireworks API key.",
+            file=sys.stderr,
+        )
+        return 1
+
     try:
         tasks = load_tasks(INPUT_PATH)
     except Exception as e:
