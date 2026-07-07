@@ -167,6 +167,9 @@ class FireworksAIProvider(AIProvider):
 
 def get_active_provider() -> AIProvider:
     """Factory used by the rest of the app — the single seam to swap backends."""
+    if config.ACTIVE_PROVIDER == "agent":
+        from app.services.agent_provider import AgentProvider  # avoids circular import
+        return AgentProvider()
     if config.ACTIVE_PROVIDER == "fireworks":
         return FireworksAIProvider()
     return PlaceholderProvider()

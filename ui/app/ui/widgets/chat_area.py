@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -96,6 +96,15 @@ class ChatArea(QWidget):
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
+        # Autoscroll follows user intent: scrolling up disables it, returning
+        # to the bottom re-enables it. Programmatic moves must not count as
+        # user scrolls, so they are guarded by _programmatic_scroll.
+        self._autoscroll = True
+        self._programmatic_scroll = False
+        bar = self.scroll_area.verticalScrollBar()
+        bar.valueChanged.connect(self._on_user_scroll)
+        bar.rangeChanged.connect(self._on_scroll_range_changed)
+
         container = QWidget()
         self.messages_layout = QVBoxLayout(container)
         self.messages_layout.setContentsMargins(0, 12, 0, 12)
@@ -148,7 +157,8 @@ class ChatArea(QWidget):
     def append_stream_chunk(self, chunk: str) -> None:
         if self._current_assistant_bubble:
             self._current_assistant_bubble.append_stream_chunk(chunk)
-            self._scroll_to_bottom(force=False)
+            # No explicit scroll: _on_scroll_range_changed pins the view while
+            # autoscroll is on, and leaves it alone once the user scrolls up.
 
     def finish_streaming(self) -> None:
         self._current_assistant_bubble = None
@@ -210,7 +220,27 @@ class ChatArea(QWidget):
         self._current_assistant_bubble = None
 
     def _scroll_to_bottom(self, force: bool = True) -> None:
+        if force:
+            self._autoscroll = True
+        if self._autoscroll:
+            bar = self.scroll_area.verticalScrollBar()
+            self._set_scroll_value(bar.maximum())
+
+    def _set_scroll_value(self, value: int) -> None:
+        self._programmatic_scroll = True
+        try:
+            self.scroll_area.verticalScrollBar().setValue(value)
+        finally:
+            self._programmatic_scroll = False
+
+    def _on_user_scroll(self, value: int) -> None:
+        if self._programmatic_scroll:
+            return
         bar = self.scroll_area.verticalScrollBar()
-        was_at_bottom = bar.value() >= bar.maximum() - 60
-        if force or was_at_bottom:
-            QTimer.singleShot(0, lambda: bar.setValue(bar.maximum()))
+        self._autoscroll = value >= bar.maximum() - 4
+
+    def _on_scroll_range_changed(self, _min: int, maximum: int) -> None:
+        # Content grew (streaming, images, layout): keep following only if the
+        # user hasn't scrolled away from the bottom.
+        if self._autoscroll:
+            self._set_scroll_value(maximum)

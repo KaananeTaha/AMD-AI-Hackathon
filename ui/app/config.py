@@ -34,7 +34,11 @@ DB_PATH = APP_DATA_DIR / "nova.sqlite3"
 # ---------------------------------------------------------------------------
 # "placeholder" simulates a streaming assistant with no network access.
 # "fireworks" calls Fireworks AI — fill in credentials in services/ai_service.py.
-ACTIVE_PROVIDER = "placeholder"
+# "agent" routes through the Track 1 agent at the repo root (classifier + tiers).
+ACTIVE_PROVIDER = "agent"
+
+# Prefix each reply with the routed `category → model` badge (agent provider only).
+SHOW_AGENT_ROUTING = True
 
 FIREWORKS_API_KEY = os.environ.get("FIREWORKS_API_KEY", "")
 FIREWORKS_MODEL = "accounts/fireworks/models/llama-v3p1-70b-instruct"
