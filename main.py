@@ -13,11 +13,14 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 
 from agent import solve
-from llm import describe_tiers, usage
+from llm import call_log, describe_tiers, usage
 
 
-INPUT_PATH = os.environ.get("INPUT_PATH", "input/tasks.json")
-OUTPUT_PATH = os.environ.get("OUTPUT_PATH", "output/results.json")
+# Defaults MUST stay absolute: the judging harness mounts /input and /output
+# at the filesystem root. For local runs, override via INPUT_PATH/OUTPUT_PATH
+# in .env (see .env.example) instead of editing these.
+INPUT_PATH = os.environ.get("INPUT_PATH", "/input/tasks.json")
+OUTPUT_PATH = os.environ.get("OUTPUT_PATH", "/output/results.json")
 MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "8"))
 # Stop collecting answers with headroom before the harness's 10-minute kill,
 # so results.json always gets written even if some tasks never finish.
@@ -99,6 +102,13 @@ def main() -> int:
     except Exception as e:
         print(f"FATAL: could not write results to {OUTPUT_PATH}: {e}", file=sys.stderr)
         return 1
+
+    try:  # best-effort inference log next to the results
+        log_path = os.path.join(os.path.dirname(OUTPUT_PATH) or ".", "inference_log.json")
+        with open(log_path, "w", encoding="utf-8") as f:
+            json.dump({"calls": call_log(), "totals": usage()}, f, indent=2)
+    except Exception as e:
+        print(f"WARN: could not write inference log: {e}", file=sys.stderr)
 
     u = usage()
     print(

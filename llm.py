@@ -117,6 +117,7 @@ def describe_tiers() -> str:
 
 _USAGE = {"prompt": 0, "completion": 0, "total": 0, "calls": 0}
 _USAGE_LOCK = threading.Lock()
+_CALL_LOG: list[dict] = []  # one entry per Fireworks call, for the inference log
 
 # Models that rejected `reasoning_effort`, so we stop sending it to them.
 _NO_EFFORT_PARAM: set[str] = set()
@@ -129,6 +130,11 @@ DEFAULT_REASONING_EFFORT = os.environ.get("REASONING_EFFORT", "none")
 def usage() -> dict[str, int]:
     with _USAGE_LOCK:
         return dict(_USAGE)
+
+
+def call_log() -> list[dict]:
+    with _USAGE_LOCK:
+        return list(_CALL_LOG)
 
 
 def _chat(model: str, messages: list[dict], max_tokens: int, temperature: float,
@@ -156,6 +162,12 @@ def _chat(model: str, messages: list[dict], max_tokens: int, temperature: float,
             _USAGE["completion"] += u.completion_tokens or 0
             _USAGE["total"] += u.total_tokens or 0
             _USAGE["calls"] += 1
+            _CALL_LOG.append({
+                "model": model,
+                "prompt_tokens": u.prompt_tokens or 0,
+                "completion_tokens": u.completion_tokens or 0,
+                "total_tokens": u.total_tokens or 0,
+            })
     return resp.choices[0]
 
 
