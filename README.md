@@ -9,7 +9,7 @@ category-specific handler. Routing spends no LLM tokens so the budget goes to an
 
 | File | Role |
 |------|------|
-| `main.py` | Entrypoint. Reads `/input/tasks.json` → solves tasks **concurrently** (`MAX_WORKERS`, default 8) → writes `/output/results.json` → exit 0. Logs tier mapping + token usage to stderr. |
+| `main.py` | Entrypoint. Reads `/input/tasks.json` → solves tasks **concurrently** (`MAX_WORKERS`, default 8) → writes `/output/results.json` → exit 0. A run deadline (`DEADLINE_S`, default 480) guarantees partial results get written before the 10-min harness kill. Logs tier mapping + token usage to stderr. |
 | `classifier.py` | Single-pass regex/keyword router → one of 8 `Category` values (zero tokens). |
 | `agent.py` | Dispatch layer: category → (system prompt, max_tokens, model tier) → one Fireworks call. |
 | `llm.py` | Fireworks client (OpenAI SDK @ `FIREWORKS_BASE_URL`). Model tiering from `ALLOWED_MODELS`, `reasoning_effort="none"` by default, blank-answer fallback, token accounting, 25s timeout. |

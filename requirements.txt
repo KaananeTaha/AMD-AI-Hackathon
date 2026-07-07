@@ -1,2 +1,1 @@
-# Fireworks is OpenAI-compatible; we point the OpenAI SDK at FIREWORKS_BASE_URL.
 openai>=1.30.0

@@ -1,16 +1,6 @@
-"""Track 1 harness entrypoint.
+"""Track 1 entrypoint: /input/tasks.json -> /output/results.json, exit 0.
 
-Contract (from the participant guide):
-  - Read tasks from   /input/tasks.json   on startup
-  - Write results to  /output/results.json before exiting
-  - Exit code 0 on success, non-zero on failure
-  - results.json must be valid JSON
-
-Input  : [ { "task_id": "t1", "prompt": "..." }, ... ]
-Output : [ { "task_id": "t1", "answer": "..." }, ... ]
-
-Paths default to the harness locations but can be overridden with INPUT_PATH /
-OUTPUT_PATH env vars for local development on non-Linux machines.
+Paths are overridable via INPUT_PATH / OUTPUT_PATH for local development.
 """
 
 from __future__ import annotations
@@ -18,16 +8,19 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 
 from agent import solve
+from llm import describe_tiers, usage
 
 INPUT_PATH = os.environ.get("INPUT_PATH", "/input/tasks.json")
 OUTPUT_PATH = os.environ.get("OUTPUT_PATH", "/output/results.json")
-# Concurrent Fireworks calls: the 10-min budget with up-to-30s requests makes
-# sequential runs risky beyond ~20 tasks; parallelism removes that bottleneck.
 MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "8"))
+# Stop collecting answers with headroom before the harness's 10-minute kill,
+# so results.json always gets written even if some tasks never finish.
+DEADLINE_S = float(os.environ.get("DEADLINE_S", "480"))
 
 
 def load_tasks(path: str) -> list[dict]:
@@ -48,10 +41,9 @@ def write_results(path: str, results: list[dict]) -> None:
 
 def _solve_one(task: dict, index: int) -> dict:
     task_id = task.get("task_id", f"idx_{index}")
-    prompt = task.get("prompt", "")
     try:
-        answer = solve(prompt)
-    except Exception:  # never let one task abort the batch
+        answer = solve(task.get("prompt", ""))
+    except Exception:  # one bad task must not abort the batch
         traceback.print_exc()
         answer = ""
     return {"task_id": task_id, "answer": answer}
@@ -60,10 +52,19 @@ def _solve_one(task: dict, index: int) -> dict:
 def run(tasks: list[dict]) -> list[dict]:
     if len(tasks) <= 1:
         return [_solve_one(t, i) for i, t in enumerate(tasks)]
-    workers = min(MAX_WORKERS, len(tasks))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        # pool.map preserves input order in its results
-        return list(pool.map(_solve_one, tasks, range(len(tasks))))
+
+    deadline = time.monotonic() + DEADLINE_S
+    pool = ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(tasks)))
+    futures = [pool.submit(_solve_one, t, i) for i, t in enumerate(tasks)]
+
+    results = []
+    for i, fut in enumerate(futures):
+        try:
+            results.append(fut.result(timeout=max(1.0, deadline - time.monotonic())))
+        except Exception:  # deadline hit: record a blank, keep going
+            results.append({"task_id": tasks[i].get("task_id", f"idx_{i}"), "answer": ""})
+    pool.shutdown(wait=False, cancel_futures=True)
+    return results
 
 
 def main() -> int:
@@ -74,10 +75,7 @@ def main() -> int:
         return 1
 
     print(f"Loaded {len(tasks)} task(s) from {INPUT_PATH}", file=sys.stderr)
-
-    try:  # log tier->model mapping; never fatal (e.g. env not set locally)
-        from llm import describe_tiers
-
+    try:
         print(f"Model tiers: {describe_tiers()}", file=sys.stderr)
     except Exception as e:
         print(f"WARN: could not resolve model tiers: {e}", file=sys.stderr)
@@ -90,20 +88,13 @@ def main() -> int:
         print(f"FATAL: could not write results to {OUTPUT_PATH}: {e}", file=sys.stderr)
         return 1
 
-    print(f"Wrote {len(results)} result(s) to {OUTPUT_PATH}", file=sys.stderr)
-
-    try:  # report token usage — the scored metric
-        from llm import usage
-
-        u = usage()
-        print(
-            f"Tokens: total={u['total']} (prompt={u['prompt']} "
-            f"completion={u['completion']}) over {u['calls']} call(s)",
-            file=sys.stderr,
-        )
-    except Exception:
-        pass
-
+    u = usage()
+    print(
+        f"Wrote {len(results)} result(s) to {OUTPUT_PATH} | tokens: "
+        f"total={u['total']} (prompt={u['prompt']} completion={u['completion']}) "
+        f"over {u['calls']} call(s)",
+        file=sys.stderr,
+    )
     return 0
 
 

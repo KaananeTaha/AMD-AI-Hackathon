@@ -1,89 +1,63 @@
-"""Agent dispatch layer.
-
-`solve()` is the single entry point the harness calls per task:
-classify (zero tokens) -> pick a category-specific prompt -> one Fireworks call.
-
-Prompts are deliberately terse and cap `max_tokens` per category: the leaderboard
-ranks passing submissions by fewest total tokens, so we spend the minimum needed
-to clear the accuracy gate. FACTUAL doubles as the fallback for any misroute, so
-its handler is the most general.
-"""
+"""Dispatch: classify (zero tokens) -> category prompt -> one Fireworks call."""
 
 from __future__ import annotations
 
 from classifier import Category, classify
 from llm import complete, model_for_tier
 
-# Shared preamble: kept short (input tokens count too). Pushes direct answers
-# with no restating of the question, which also trims output tokens.
-_BASE = "Answer in English. Be correct and concise. No preamble; do not restate the question."
+CHEAP, STRONG, CODE = "cheap", "strong", "code"
 
-# Tier per category (resolved to concrete models in llm.py from ALLOWED_MODELS):
-#   strong = biggest general reasoner   cheap = smallest/fastest
-#   code   = code-specialised model (falls back to strong if none allowed)
-# FACTUAL is `strong` because it is also the fallback for any misroute.
-STRONG = "strong"
-CHEAP = "cheap"
-CODE = "code"
+# Prompts are deliberately terse: input tokens count toward the scored total.
+_BASE = "English only. Be concise; no preamble."
 
-# (system_prompt, max_tokens, tier) per category.
+# (system_prompt, max_tokens, tier) per category. FACTUAL doubles as the
+# misroute fallback, so it stays on the strong tier.
 _PROMPTS: dict[Category, tuple[str, int, str]] = {
     Category.FACTUAL: (
-        f"{_BASE} Explain clearly and completely in one short paragraph; never "
-        f"exceed 120 words.",
+        f"{_BASE} Explain clearly in under 120 words.",
         300, STRONG,
     ),
     Category.MATH: (
-        f"{_BASE} Work through the problem step by step, then state the final answer "
-        f"on its own line as 'Answer: <value>'.",
+        f"{_BASE} Brief steps, then 'Answer: <value>' on its own line.",
         400, STRONG,
     ),
     Category.SENTIMENT: (
-        f"{_BASE} Give the sentiment label (positive, negative, or neutral) followed "
-        f"by one short sentence of justification.",
+        f"{_BASE} Label the sentiment positive, negative, or neutral, then give "
+        f"one short justification.",
         120, CHEAP,
     ),
     Category.SUMMARIZATION: (
-        f"{_BASE} Produce only the summary, obeying any length or format constraint "
-        f"stated in the request.",
+        f"{_BASE} Output only the summary; obey any stated length or format "
+        f"constraint.",
         220, CHEAP,
     ),
     Category.NER: (
-        f"{_BASE} Extract the named entities and label each as person, organization, "
-        f"location, or date. Output one 'label: value' per line.",
+        f"{_BASE} List each entity as 'label: value', one per line; labels: "
+        f"person, organization, location, date.",
         260, CHEAP,
     ),
     Category.CODE_DEBUG: (
-        f"{_BASE} Identify the bug in one sentence, then give the corrected code in a "
-        f"single fenced block.",
+        f"{_BASE} Name the bug in one sentence, then give the corrected code in "
+        f"one fenced block.",
         520, CODE,
     ),
     Category.LOGIC: (
-        f"{_BASE} Show the deduction in a few brief numbered steps, checking every "
-        f"constraint, then state the answer on its own line as 'Answer: <value>'.",
+        f"{_BASE} Deduce in brief numbered steps checking every constraint, then "
+        f"'Answer: <value>' on its own line.",
         420, STRONG,
     ),
     Category.CODE_GEN: (
-        f"{_BASE} Return only the requested function/code in a single fenced block, "
-        f"correct and self-contained, with no explanation.",
+        f"{_BASE} Output only the code in one fenced block, correct and "
+        f"self-contained.",
         520, CODE,
     ),
 }
 
 
-def _handle(prompt: str, category: Category) -> str:
-    system, max_tokens, tier = _PROMPTS[category]
-    primary = model_for_tier(tier)
-    # Cross-tier fallback for blank answers or hard failures: cheap-tier tasks
-    # escalate to strong; everything else de-escalates to cheap.
-    fallback = model_for_tier(STRONG if tier == CHEAP else CHEAP)
-    return complete(
-        prompt, system=system, max_tokens=max_tokens,
-        model=primary, fallback_model=fallback,
-    )
-
-
 def solve(prompt: str) -> str:
-    """Classify a single prompt and produce an answer string."""
-    category = classify(prompt)
-    return _handle(prompt, category)
+    system, max_tokens, tier = _PROMPTS[classify(prompt)]
+    primary = model_for_tier(tier)
+    # Blank answers and hard failures retry on the other tier.
+    fallback = model_for_tier(STRONG if tier == CHEAP else CHEAP)
+    return complete(prompt, system=system, max_tokens=max_tokens,
+                    model=primary, fallback_model=fallback)

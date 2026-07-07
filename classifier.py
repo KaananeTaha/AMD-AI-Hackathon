@@ -1,12 +1,5 @@
-"""Single-pass keyword/pattern router for Track 1 capability categories.
-
-The goal is to classify each task WITHOUT spending any LLM tokens, so the
-category can be used to pick a specialised (cheap) prompt/handler downstream.
-
-Classification is a single pass of cheap regex/keyword heuristics with an
-explicit priority order. It is intentionally conservative: when nothing matches
-strongly we fall back to FACTUAL, which is the most general handler.
-"""
+"""Zero-token task router: one pass of regex heuristics over the prompt,
+priority-ordered, falling back to FACTUAL (the most general handler)."""
 
 from __future__ import annotations
 
@@ -119,27 +112,10 @@ def _has_code(text: str) -> bool:
 
 
 def classify(prompt: str) -> Category:
-    """Return the best-guess Category for a prompt in a single heuristic pass."""
+    """Best-guess Category in a single heuristic pass."""
     text = prompt or ""
-
-    code_present = _has_code(text)
-
     for cat in _PRIORITY:
-        # Code categories require an actual code signal to avoid false hits on
-        # words like "function of" in a factual question.
-        if cat in (Category.CODE_DEBUG, Category.CODE_GEN):
-            matched = any(rx.search(text) for rx in _COMPILED[cat])
-            if not matched:
-                continue
-            if cat == Category.CODE_DEBUG:
-                return Category.CODE_DEBUG
-            # CODE_GEN: a spec-to-code request; code_present isn't required.
-            return Category.CODE_GEN
-
         if any(rx.search(text) for rx in _COMPILED[cat]):
             return cat
-
-    # Nothing matched: if there is code, assume debugging; else factual.
-    if code_present:
-        return Category.CODE_DEBUG
-    return Category.FACTUAL
+    # No pattern matched: raw code present usually means a debugging task.
+    return Category.CODE_DEBUG if _has_code(text) else Category.FACTUAL
